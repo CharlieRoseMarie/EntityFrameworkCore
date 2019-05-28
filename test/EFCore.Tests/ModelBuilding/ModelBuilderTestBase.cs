@@ -130,14 +130,16 @@ namespace Microsoft.EntityFrameworkCore.ModelBuilding
                     ValidationLoggerFactory,
                     options,
                     new DiagnosticListener("Fake"),
-                    testHelpers.LoggingDefinitions);
+                    testHelpers.LoggingDefinitions,
+                    null);
 
                 ModelLoggerFactory = new ListLoggerFactory(l => l == DbLoggerCategory.Model.Name);
                 var modelLogger = new DiagnosticsLogger<DbLoggerCategory.Model>(
                     ModelLoggerFactory,
                     options,
                     new DiagnosticListener("Fake"),
-                    testHelpers.LoggingDefinitions);
+                    testHelpers.LoggingDefinitions,
+                    null);
 
                 ModelBuilder = testHelpers.CreateConventionBuilder(modelLogger, validationLogger);
             }

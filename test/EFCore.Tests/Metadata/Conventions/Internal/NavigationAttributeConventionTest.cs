@@ -904,7 +904,8 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Conventions.Internal
                 ListLoggerFactory,
                 options,
                 new DiagnosticListener("Fake"),
-                new TestLoggingDefinitions());
+                new TestLoggingDefinitions(),
+                null);
             return modelLogger;
         }
 

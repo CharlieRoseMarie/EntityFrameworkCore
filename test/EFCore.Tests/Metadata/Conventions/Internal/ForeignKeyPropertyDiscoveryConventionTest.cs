@@ -913,7 +913,7 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Conventions.Internal
         public void Sets_foreign_key_if_matching_non_shadow_property_added()
         {
             var relationshipBuilder = DependentType.Builder.HasRelationship(PrincipalType, "SomeNav", null, ConfigurationSource.Convention);
-            
+
             var newRelationshipBuilder = RunConvention(relationshipBuilder);
             Assert.Same(relationshipBuilder, newRelationshipBuilder);
 
@@ -1085,7 +1085,8 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Conventions.Internal
                 ListLoggerFactory,
                 options,
                 new DiagnosticListener("Fake"),
-                new TestLoggingDefinitions());
+                new TestLoggingDefinitions(),
+                null);
             return modelLogger;
         }
 

@@ -45,11 +45,26 @@ namespace Microsoft.EntityFrameworkCore.Infrastructure
             var loggerFactory = new ListLoggerFactory(filter);
 
             var dbLogger = new DiagnosticsLogger<DbLoggerCategory.Database>(
-                loggerFactory, new LoggingOptions(), new DiagnosticListener("Fake"), new TestLoggingDefinitions());
+                loggerFactory,
+                new LoggingOptions(),
+                new DiagnosticListener("Fake"),
+                new TestLoggingDefinitions(),
+                null);
+
             var sqlLogger = new DiagnosticsLogger<DbLoggerCategory.Database.Command>(
-                loggerFactory, new LoggingOptions(), new DiagnosticListener("Fake"), new TestLoggingDefinitions());
+                loggerFactory,
+                new LoggingOptions(),
+                new DiagnosticListener("Fake"),
+                new TestLoggingDefinitions(),
+                null);
+
             var queryLogger = new DiagnosticsLogger<DbLoggerCategory.Query>(
-                loggerFactory, new LoggingOptions(), new DiagnosticListener("Fake"), new TestLoggingDefinitions());
+                loggerFactory,
+                new LoggingOptions(),
+                new DiagnosticListener("Fake"),
+                new TestLoggingDefinitions(),
+                null);
+
             var randomLogger = loggerFactory.CreateLogger("Random");
 
             dbLogger.Logger.LogInformation(1, "DB1");

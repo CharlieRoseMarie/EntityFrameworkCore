@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Relational.Query.Pipeline.SqlExpressions;
@@ -18,7 +19,7 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
         {
             private readonly RelationalQueryContext _relationalQueryContext;
             private readonly SelectExpression _selectExpression;
-            private readonly Func<QueryContext, DbDataReader, ResultCoordinator, T> _shaper;
+            private readonly Func<QueryContext, DbDataReader, int[], ResultCoordinator, T> _shaper;
             private readonly IQuerySqlGeneratorFactory _querySqlGeneratorFactory;
             private readonly Type _contextType;
             private readonly IDiagnosticsLogger<DbLoggerCategory.Query> _logger;
@@ -30,7 +31,7 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
                 ISqlExpressionFactory sqlExpressionFactory,
                 IParameterNameGeneratorFactory parameterNameGeneratorFactory,
                 SelectExpression selectExpression,
-                Func<QueryContext, DbDataReader, ResultCoordinator, T> shaper,
+                Func<QueryContext, DbDataReader, int[], ResultCoordinator, T> shaper,
                 Type contextType,
                 IDiagnosticsLogger<DbLoggerCategory.Query> logger)
             {
@@ -50,10 +51,11 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
             private sealed class Enumerator : IEnumerator<T>
             {
                 private RelationalDataReader _dataReader;
+                private int[] _indexMap;
                 private ResultCoordinator _resultCoordinator;
                 private readonly RelationalQueryContext _relationalQueryContext;
                 private readonly SelectExpression _selectExpression;
-                private readonly Func<QueryContext, DbDataReader, ResultCoordinator, T> _shaper;
+                private readonly Func<QueryContext, DbDataReader, int[], ResultCoordinator, T> _shaper;
                 private readonly IQuerySqlGeneratorFactory _querySqlGeneratorFactory;
                 private readonly Type _contextType;
                 private readonly IDiagnosticsLogger<DbLoggerCategory.Query> _logger;
@@ -76,46 +78,55 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
 
                 object IEnumerator.Current => Current;
 
-                public void Dispose()
-                {
-                    _dataReader?.Dispose();
-                    _dataReader = null;
-                    _relationalQueryContext.Connection.Close();
-                }
-
                 public bool MoveNext()
                 {
                     try
                     {
                         if (_dataReader == null)
                         {
-                            _relationalQueryContext.Connection.Open();
+                            var selectExpression = new ParameterValueBasedSelectExpressionOptimizer(
+                                _sqlExpressionFactory,
+                                _parameterNameGeneratorFactory)
+                                .Optimize(_selectExpression, _relationalQueryContext.ParameterValues);
 
-                            try
+                            var relationalCommand = _querySqlGeneratorFactory.Create().GetCommand(selectExpression);
+
+                            _dataReader
+                                = relationalCommand.ExecuteReader(
+                                    _relationalQueryContext.Connection,
+                                    _relationalQueryContext.ParameterValues,
+                                    _relationalQueryContext.CommandLogger);
+
+                            if (selectExpression.IsNonComposedFromSql())
                             {
-                                var selectExpression = new ParameterValueBasedSelectExpressionOptimizer(
-                                    _sqlExpressionFactory,
-                                    _parameterNameGeneratorFactory)
-                                    .Optimize(_selectExpression, _relationalQueryContext.ParameterValues);
+                                var projection = _selectExpression.Projection.ToList();
+                                var readerColumns = Enumerable.Range(0, _dataReader.DbDataReader.FieldCount)
+                                    .ToDictionary(i => _dataReader.DbDataReader.GetName(i), i => i, StringComparer.OrdinalIgnoreCase);
 
-                                var relationalCommand = _querySqlGeneratorFactory.Create().GetCommand(selectExpression);
+                                _indexMap = new int[projection.Count];
+                                for (var i = 0; i < projection.Count; i++)
+                                {
+                                    if (projection[i].Expression is ColumnExpression columnExpression)
+                                    {
+                                        var columnName = columnExpression.Name;
+                                        if (columnName != null)
+                                        {
+                                            if (!readerColumns.TryGetValue(columnName, out var ordinal))
+                                            {
+                                                throw new InvalidOperationException(RelationalStrings.FromSqlMissingColumn(columnName));
+                                            }
 
-                                _dataReader
-                                    = relationalCommand.ExecuteReader(
-                                        _relationalQueryContext.Connection,
-                                        _relationalQueryContext.ParameterValues,
-                                        _relationalQueryContext.CommandLogger);
-
-                                _resultCoordinator = new ResultCoordinator();
+                                            _indexMap[i] = ordinal;
+                                        }
+                                    }
+                                }
                             }
-                            catch (Exception)
+                            else
                             {
-                                // If failure happens creating the data reader, then it won't be available to
-                                // handle closing the connection, so do it explicitly here to preserve ref counting.
-                                _relationalQueryContext.Connection.Close();
-
-                                throw;
+                                _indexMap = null;
                             }
+
+                            _resultCoordinator = new ResultCoordinator();
                         }
 
                         var hasNext = _resultCoordinator.HasNext ?? _dataReader.Read();
@@ -123,7 +134,7 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
 
                         Current
                             = hasNext
-                                ? _shaper(_relationalQueryContext, _dataReader.DbDataReader, _resultCoordinator)
+                                ? _shaper(_relationalQueryContext, _dataReader.DbDataReader, _indexMap, _resultCoordinator)
                                 : default;
 
                         return hasNext;
@@ -134,6 +145,12 @@ namespace Microsoft.EntityFrameworkCore.Relational.Query.Pipeline
 
                         throw;
                     }
+                }
+
+                public void Dispose()
+                {
+                    _dataReader?.Dispose();
+                    _dataReader = null;
                 }
 
                 public void Reset() => throw new NotImplementedException();
